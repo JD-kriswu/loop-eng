@@ -44,3 +44,6 @@ gen_token.go.bak
 
 # Compiled binary
 loopanyd
+
+# Binary in root (exact match)
+/server

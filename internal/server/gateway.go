@@ -406,10 +406,15 @@ func (g *Gateway) HandleLoopOps(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(resp)
 
 	case "DELETE":
-		// Disable the loop (soft delete)
-		g.store.UpdateLoop(ctx, loopID, map[string]interface{}{
-			"enabled": false,
-		})
+		// Permanently delete the loop and all its runs
+		if err := g.store.DeleteLoop(ctx, loopID); err != nil {
+			if err.Error() == "loop not found" {
+				http.Error(w, "loop not found", 404)
+			} else {
+				http.Error(w, "delete failed: "+err.Error(), 500)
+			}
+			return
+		}
 		w.WriteHeader(http.StatusNoContent)
 
 	default:

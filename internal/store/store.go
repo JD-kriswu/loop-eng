@@ -356,6 +356,55 @@ func (s *Store) FinishLoop(ctx context.Context, loopID, reason string) error {
 	return err
 }
 
+// DeleteLoop permanently deletes a loop and all its associated data.
+func (s *Store) DeleteLoop(ctx context.Context, loopID string) error {
+	// Start a transaction to ensure atomicity
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to start transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Delete run_tokens for all runs of this loop
+	_, err = tx.ExecContext(ctx, `
+		DELETE FROM run_tokens
+		WHERE run_id IN (
+			SELECT id FROM runs WHERE loop_id = $1
+		)
+	`, loopID)
+	if err != nil {
+		return fmt.Errorf("failed to delete run tokens: %w", err)
+	}
+
+	// Delete all runs for this loop
+	_, err = tx.ExecContext(ctx, "DELETE FROM runs WHERE loop_id = $1", loopID)
+	if err != nil {
+		return fmt.Errorf("failed to delete runs: %w", err)
+	}
+
+	// Delete the loop itself
+	result, err := tx.ExecContext(ctx, "DELETE FROM loops WHERE id = $1", loopID)
+	if err != nil {
+		return fmt.Errorf("failed to delete loop: %w", err)
+	}
+
+	// Check if loop existed
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to check rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return fmt.Errorf("loop not found")
+	}
+
+	// Commit transaction
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
 // ============================================================
 // Run Operations
 // ============================================================

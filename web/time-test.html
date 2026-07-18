@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>时间显示测试</title>
+    <style>
+        body {
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            background: #1a1a2e;
+            color: #e0e0e0;
+            padding: 40px;
+        }
+        .info {
+            background: rgba(0,245,255,0.1);
+            padding: 20px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        .label {
+            color: #00f5ff;
+            font-weight: bold;
+        }
+        .value {
+            color: #fff;
+            font-size: 18px;
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🕐 时间显示测试</h1>
+    <div id="result" class="info">加载中...</div>
+
+    <script>
+        fetch('/loopany/api/runs?limit=3')
+            .then(r => r.json())
+            .then(runs => {
+                let html = '<h2>Runs 时间显示：</h2>';
+
+                runs.forEach(run => {
+                    const utcTime = run.createdAt;
+                    const date = new Date(utcTime);
+
+                    html += `
+                        <div class="info">
+                            <p class="label">Loop: ${run.loop_name}</p>
+                            <p><span class="label">API返回(UTC):</span> <span class="value">${utcTime}</span></p>
+                            <p><span class="label">北京时间(应该显示):</span> <span class="value">${date.toLocaleString('zh-CN', {timeZone: 'Asia/Shanghai'})}</span></p>
+                            <p><span class="label">本地时间:</span> <span class="value">${date.toLocaleString()}</span></p>
+                        </div>
+                    `;
+                });
+
+                document.getElementById('result').innerHTML = html;
+            })
+            .catch(err => {
+                document.getElementById('result').innerHTML =
+                    '<p style="color:#ff4757">错误: ' + err + '</p>';
+            });
+    </script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Loopany Test</title>
+</head>
+<body>
+    <h1>Loopany API Test</h1>
+    <pre id="result">Loading...</pre>
+    <script>
+        fetch('/api/stats')
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('result').textContent = JSON.stringify(data, null, 2);
+            })
+            .catch(err => {
+                document.getElementById('result').textContent = 'Error: ' + err.message;
+            });
+    </script>
+</body>
+</html>

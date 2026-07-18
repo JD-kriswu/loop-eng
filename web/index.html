@@ -427,8 +427,18 @@
                             <input type="text" id="loopName" placeholder="e.g., Daily Report Generator" required>
                         </div>
                         <div class="form-group">
-                            <label>Goal / Task Description</label>
-                            <textarea id="loopGoal" placeholder="Describe what the agent should do..." required></textarea>
+                            <label>Task Description *</label>
+                            <textarea id="loopTask" placeholder="Describe what the agent should do each run..." required></textarea>
+                            <small style="color: #606070; font-size: 11px; display: block; margin-top: 5px;">
+                                This task will be executed every time the loop runs
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label>Goal / Finish Line (Optional)</label>
+                            <textarea id="loopGoal" placeholder="Leave EMPTY for continuous monitoring loops, or describe when to STOP this loop..."></textarea>
+                            <small style="color: #ffaa00; font-size: 11px; display: block; margin-top: 5px;">
+                                ⚠️ If set, the loop will STOP after achieving this goal. Leave empty for continuous monitoring.
+                            </small>
                         </div>
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
                             <div class="form-group">
@@ -487,6 +497,7 @@
                         <thead>
                             <tr>
                                 <th>Name</th>
+                                <th>Task</th>
                                 <th>Goal</th>
                                 <th>Model</th>
                                 <th>Agent</th>
@@ -668,7 +679,8 @@
                 tbody.innerHTML = loops.map(loop => `
                     <tr>
                         <td><strong>${loop.name}</strong></td>
-                        <td style="max-width:300px;overflow:hidden;text-overflow:ellipsis">${loop.goal || '-'}</td>
+                        <td style="max-width:250px;overflow:hidden;text-overflow:ellipsis">${loop.task || '-'}</td>
+                        <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;color:${loop.goal ? '#ffaa00' : '#606070'}">${loop.goal || '(continuous)'}</td>
                         <td>${loop.model || '-'}</td>
                         <td>${loop.agent}</td>
                         <td><span class="badge ${loop.enabled ? 'badge-running' : 'badge-pending'}">${loop.enabled ? 'Active' : 'Disabled'}</span></td>
@@ -777,6 +789,7 @@
             const data = {
                 machine_id: 'machine-001',
                 name: document.getElementById('loopName').value,
+                task: document.getElementById('loopTask').value,
                 goal: document.getElementById('loopGoal').value,
                 workdir: document.getElementById('loopWorkdir').value || '/tmp/loopany-test',
                 model: document.getElementById('loopModel').value || 'glm-5',
@@ -1130,6 +1143,7 @@
                 // Fill form
                 document.getElementById('editLoopId').value = loop.id;
                 document.getElementById('editLoopName').value = loop.name || '';
+                document.getElementById('editLoopTask').value = loop.task || '';
                 document.getElementById('editLoopGoal').value = loop.goal || '';
                 document.getElementById('editLoopCron').value = loop.cron || '';
                 document.getElementById('editLoopTimezone').value = loop.timezone || '';
@@ -1158,6 +1172,7 @@
             const loopId = document.getElementById('editLoopId').value;
             const data = {
                 name: document.getElementById('editLoopName').value,
+                task: document.getElementById('editLoopTask').value,
                 goal: document.getElementById('editLoopGoal').value,
                 cron: document.getElementById('editLoopCron').value,
                 timezone: document.getElementById('editLoopTimezone').value,

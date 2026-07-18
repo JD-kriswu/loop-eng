@@ -77,6 +77,7 @@ const (
 type LoopInfo struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
+	Task         string `json:"task"`
 	Workdir      string `json:"workdir"`
 	TaskFile     string `json:"taskFile"`
 	Workflow     string `json:"workflow"`
@@ -220,6 +221,7 @@ type UpdateLoopRequest struct {
 type LoopResponse struct {
 	ID           string   `json:"id"`
 	Name         string   `json:"name"`
+	Task         string   `json:"task"`
 	MachineID    string   `json:"machineId"`
 	Cron         string   `json:"cron"`
 	Timezone     string   `json:"timezone"`

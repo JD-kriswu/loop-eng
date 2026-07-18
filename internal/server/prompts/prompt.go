@@ -13,8 +13,9 @@ var execCorePrompt string
 // ExecCoreData holds template data for exec-core prompt.
 type ExecCoreData struct {
 	Name      string
+	Task      string // 任务描述
 	TaskFile  string
-	GoalLine  string
+	GoalLine  string // 完成条件（可选）
 	StateLine string
 }
 

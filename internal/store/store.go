@@ -1,4 +1,3 @@
-
 // Package store provides database persistence.
 package store
 
@@ -9,9 +8,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/lib/pq"
 	"github.com/yourorg/loopany-go/internal/protocol"
 	"github.com/yourorg/loopany-go/pkg/token"
-	"github.com/lib/pq"
 )
 
 // Store implements database operations.
@@ -119,73 +118,98 @@ func (s *Store) GetDeviceOwner(ctx context.Context, tokenHash string) (string, e
 
 // Loop represents a scheduled agent loop.
 type Loop struct {
-	ID              string    `json:"id"`
-	MachineID       string    `json:"machineId"`
-	Name            string    `json:"name"`
-	Cron            string    `json:"cron"`
-	Timezone        string    `json:"timezone"`
-	Workdir         string    `json:"workdir"`
-	TaskFile        string    `json:"taskFile"`
-	Workflow        string    `json:"workflow"`
-	Model           string    `json:"model"`
-	Agent           string    `json:"agent"`
-	Notify          []string  `json:"notify"`
-	Enabled         bool      `json:"enabled"`
-	Goal            string    `json:"goal"`
-	AllowControl    bool      `json:"allowControl"`
-	State           any       `json:"state"`
-	CompletedAt     *time.Time `json:"completedAt,omitempty"`
-	CompletionReason string    `json:"completionReason,omitempty"`
-	CreatedAt       time.Time `json:"createdAt"`
-	UpdatedAt       time.Time `json:"updatedAt"`
+	ID               string     `json:"id"`
+	MachineID        string     `json:"machineId"`
+	Name             string     `json:"name"`
+	Task             string     `json:"task"`             // 任务描述：每次执行要做什么
+	Cron             string     `json:"cron"`
+	Timezone         string     `json:"timezone"`
+	Workdir          string     `json:"workdir"`
+	TaskFile         string     `json:"taskFile"`
+	Workflow         string     `json:"workflow"`
+	Model            string     `json:"model"`
+	Agent            string     `json:"agent"`
+	Notify           []string   `json:"notify"`
+	Enabled          bool       `json:"enabled"`
+	Goal             string     `json:"goal"`             // 完成条件：何时结束 Loop（可选）
+	AllowControl     bool       `json:"allowControl"`
+	State            any        `json:"state"`
+	CompletedAt      *time.Time `json:"completedAt,omitempty"`
+	CompletionReason string     `json:"completionReason,omitempty"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	UpdatedAt        time.Time  `json:"updatedAt"`
 }
 
-// CreateLoop creates a new loop.
-func (s *Store) CreateLoop(ctx context.Context, loop *Loop) error {
-	query := `
-		INSERT INTO loops (id, machine_id, name, cron, timezone, workdir, task_file, workflow, model, agent, notify, enabled, goal, allow_control, state, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
-	`
-	stateJSON, _ := json.Marshal(loop.State)
-	_, err := s.db.ExecContext(ctx, query,
-		loop.ID, loop.MachineID, loop.Name, loop.Cron, loop.Timezone, loop.Workdir,
-		loop.TaskFile, loop.Workflow, loop.Model, loop.Agent,
-		pq.Array(loop.Notify), loop.Enabled, loop.Goal, loop.AllowControl,
-		stateJSON, loop.CreatedAt, loop.UpdatedAt,
-	)
-	return err
-}
+const loopFields = "id, machine_id, name, task, cron, timezone, workdir, task_file, workflow, model, agent, notify, enabled, goal, allow_control, state, completed_at, completion_reason, created_at, updated_at"
 
-// GetLoop retrieves a loop by ID.
-func (s *Store) GetLoop(ctx context.Context, loopID string) (*Loop, error) {
-	query := `
-		SELECT id, machine_id, name, cron, timezone, workdir, task_file, workflow, model, agent, notify, enabled, goal, allow_control, state, completed_at, completion_reason, created_at, updated_at
-		FROM loops WHERE id = $1
-	`
+// scanLoop is a helper to scan loop fields
+func scanLoop(rows *sql.Rows) (*Loop, error) {
 	loop := &Loop{}
 	var stateJSON []byte
+	var completedAt sql.NullTime
 	var completionReason sql.NullString
-	err := s.db.QueryRowContext(ctx, query, loopID).Scan(
-		&loop.ID, &loop.MachineID, &loop.Name, &loop.Cron, &loop.Timezone, &loop.Workdir,
-		&loop.TaskFile, &loop.Workflow, &loop.Model, &loop.Agent,
+
+	err := rows.Scan(
+		&loop.ID, &loop.MachineID, &loop.Name, &loop.Task, &loop.Cron, &loop.Timezone,
+		&loop.Workdir, &loop.TaskFile, &loop.Workflow, &loop.Model, &loop.Agent,
 		pq.Array(&loop.Notify), &loop.Enabled, &loop.Goal, &loop.AllowControl,
-		&stateJSON, &loop.CompletedAt, &completionReason, &loop.CreatedAt, &loop.UpdatedAt,
+		&stateJSON, &completedAt, &completionReason, &loop.CreatedAt, &loop.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
+
 	if len(stateJSON) > 0 {
 		json.Unmarshal(stateJSON, &loop.State)
 	}
 	if completionReason.Valid {
 		loop.CompletionReason = completionReason.String
 	}
+	if completedAt.Valid {
+		loop.CompletedAt = &completedAt.Time
+	}
+
 	return loop, nil
+}
+
+// CreateLoop creates a new loop.
+func (s *Store) CreateLoop(ctx context.Context, loop *Loop) error {
+	query := `
+		INSERT INTO loops (` + loopFields + `)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+	`
+	stateJSON, _ := json.Marshal(loop.State)
+	var completedAt interface{}
+	if loop.CompletedAt != nil {
+		completedAt = *loop.CompletedAt
+	}
+	_, err := s.db.ExecContext(ctx, query,
+		loop.ID, loop.MachineID, loop.Name, loop.Task, loop.Cron, loop.Timezone, loop.Workdir,
+		loop.TaskFile, loop.Workflow, loop.Model, loop.Agent,
+		pq.Array(loop.Notify), loop.Enabled, loop.Goal, loop.AllowControl,
+		stateJSON, completedAt, loop.CompletionReason, loop.CreatedAt, loop.UpdatedAt,
+	)
+	return err
+}
+
+// GetLoop retrieves a loop by ID.
+func (s *Store) GetLoop(ctx context.Context, loopID string) (*Loop, error) {
+	query := `SELECT ` + loopFields + ` FROM loops WHERE id = $1`
+	rows, err := s.db.QueryContext(ctx, query, loopID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		return nil, sql.ErrNoRows
+	}
+
+	return scanLoop(rows)
 }
 
 // UpdateLoop updates a loop.
 func (s *Store) UpdateLoop(ctx context.Context, loopID string, updates map[string]interface{}) error {
-	// Build dynamic UPDATE
 	args := []interface{}{time.Now()}
 	argNum := 2
 	updateParts := []string{"updated_at = $1"}
@@ -194,6 +218,10 @@ func (s *Store) UpdateLoop(ctx context.Context, loopID string, updates map[strin
 		switch key {
 		case "name":
 			updateParts = append(updateParts, fmt.Sprintf("name = $%d", argNum))
+			args = append(args, value)
+			argNum++
+		case "task":
+			updateParts = append(updateParts, fmt.Sprintf("task = $%d", argNum))
 			args = append(args, value)
 			argNum++
 		case "cron":
@@ -259,11 +287,10 @@ func (s *Store) UpdateLoop(ctx context.Context, loopID string, updates map[strin
 	_, err := s.db.ExecContext(ctx, query, args...)
 	return err
 }
+
+// ListLoopsByMachine retrieves all loops for a machine.
 func (s *Store) ListLoopsByMachine(ctx context.Context, machineID string) ([]*Loop, error) {
-	query := `
-		SELECT id, machine_id, name, cron, timezone, workdir, task_file, workflow, model, agent, notify, enabled, goal, allow_control, state, completed_at, completion_reason, created_at, updated_at
-		FROM loops WHERE machine_id = $1 ORDER BY created_at DESC
-	`
+	query := `SELECT ` + loopFields + ` FROM loops WHERE machine_id = $1 ORDER BY created_at DESC`
 	rows, err := s.db.QueryContext(ctx, query, machineID)
 	if err != nil {
 		return nil, err
@@ -272,22 +299,9 @@ func (s *Store) ListLoopsByMachine(ctx context.Context, machineID string) ([]*Lo
 
 	var loops []*Loop
 	for rows.Next() {
-		loop := &Loop{}
-		var stateJSON []byte
-		var completionReason sql.NullString
-		if err := rows.Scan(
-			&loop.ID, &loop.MachineID, &loop.Name, &loop.Cron, &loop.Timezone, &loop.Workdir,
-			&loop.TaskFile, &loop.Workflow, &loop.Model, &loop.Agent,
-			pq.Array(&loop.Notify), &loop.Enabled, &loop.Goal, &loop.AllowControl,
-			&stateJSON, &loop.CompletedAt, &completionReason, &loop.CreatedAt, &loop.UpdatedAt,
-		); err != nil {
+		loop, err := scanLoop(rows)
+		if err != nil {
 			return nil, err
-		}
-		if len(stateJSON) > 0 {
-			json.Unmarshal(stateJSON, &loop.State)
-		}
-		if completionReason.Valid {
-			loop.CompletionReason = completionReason.String
 		}
 		loops = append(loops, loop)
 	}
@@ -296,10 +310,7 @@ func (s *Store) ListLoopsByMachine(ctx context.Context, machineID string) ([]*Lo
 
 // ListEnabledLoops retrieves all enabled loops for scheduling.
 func (s *Store) ListEnabledLoops(ctx context.Context) ([]*Loop, error) {
-	query := `
-		SELECT id, machine_id, name, cron, timezone, workdir, task_file, workflow, model, agent, notify, enabled, goal, allow_control, state, completed_at, completion_reason, created_at, updated_at
-		FROM loops WHERE enabled = true ORDER BY created_at DESC
-	`
+	query := `SELECT ` + loopFields + ` FROM loops WHERE enabled = true ORDER BY created_at DESC`
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
@@ -308,26 +319,41 @@ func (s *Store) ListEnabledLoops(ctx context.Context) ([]*Loop, error) {
 
 	var loops []*Loop
 	for rows.Next() {
-		loop := &Loop{}
-		var stateJSON []byte
-		var completionReason sql.NullString
-		if err := rows.Scan(
-			&loop.ID, &loop.MachineID, &loop.Name, &loop.Cron, &loop.Timezone, &loop.Workdir,
-			&loop.TaskFile, &loop.Workflow, &loop.Model, &loop.Agent,
-			pq.Array(&loop.Notify), &loop.Enabled, &loop.Goal, &loop.AllowControl,
-			&stateJSON, &loop.CompletedAt, &completionReason, &loop.CreatedAt, &loop.UpdatedAt,
-		); err != nil {
+		loop, err := scanLoop(rows)
+		if err != nil {
 			return nil, err
-		}
-		if len(stateJSON) > 0 {
-			json.Unmarshal(stateJSON, &loop.State)
-		}
-		if completionReason.Valid {
-			loop.CompletionReason = completionReason.String
 		}
 		loops = append(loops, loop)
 	}
 	return loops, nil
+}
+
+// FinishLoop marks a loop as completed.
+func (s *Store) FinishLoop(ctx context.Context, loopID, reason string) error {
+	loop, err := s.GetLoop(ctx, loopID)
+	if err != nil {
+		return fmt.Errorf("loop not found: %w", err)
+	}
+
+	if loop.Goal == "" {
+		return fmt.Errorf("loop has no goal to finish")
+	}
+
+	if loop.CompletedAt != nil {
+		return fmt.Errorf("loop already completed")
+	}
+
+	now := time.Now()
+	query := `
+		UPDATE loops SET
+			enabled = false,
+			completed_at = $2,
+			completion_reason = $3,
+			updated_at = $4
+		WHERE id = $1
+	`
+	_, err = s.db.ExecContext(ctx, query, loopID, now, reason, now)
+	return err
 }
 
 // ============================================================
@@ -340,7 +366,7 @@ type Run struct {
 	LoopID         string          `json:"loopId"`
 	MachineID      string          `json:"machineId"`
 	Role           protocol.RunRole `json:"role"`
-	Status         string          `json:"status"` // pending, running, done, error, skipped
+	Status         string          `json:"status"`
 	Outcome        string          `json:"outcome"`
 	Message        string          `json:"message"`
 	Error          string          `json:"error"`
@@ -369,7 +395,6 @@ func (s *Store) CreatePendingRun(ctx context.Context, run *Run) error {
 
 // ClaimRun claims a pending run for a machine.
 func (s *Store) ClaimRun(ctx context.Context, runID, machineID string) (*Run, error) {
-	// Check if run is still pending
 	var status string
 	err := s.db.QueryRowContext(ctx, "SELECT status FROM runs WHERE id = $1", runID).Scan(&status)
 	if err != nil {
@@ -379,26 +404,18 @@ func (s *Store) ClaimRun(ctx context.Context, runID, machineID string) (*Run, er
 		return nil, fmt.Errorf("run already claimed")
 	}
 
-	// Generate run token
 	runToken := token.GenerateID()
-
-	// Update run to running
-	query := `
-		UPDATE runs SET status = 'running', machine_id = $2
-		WHERE id = $1 AND status = 'pending'
-	`
+	query := `UPDATE runs SET status = 'running', machine_id = $2 WHERE id = $1 AND status = 'pending'`
 	_, err = s.db.ExecContext(ctx, query, runID, machineID)
 	if err != nil {
 		return nil, err
 	}
 
-	// Store run token
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO run_tokens (run_id, token_hash, created_at)
 		VALUES ($1, $2, $3)
 	`, runID, runToken, time.Now())
 
-	// Return the run
 	return s.GetRun(ctx, runID)
 }
 
@@ -406,7 +423,6 @@ func (s *Store) ClaimRun(ctx context.Context, runID, machineID string) (*Run, er
 func (s *Store) ReportRun(ctx context.Context, runID string, report *protocol.ReportRequest) error {
 	now := time.Now()
 
-	// Determine outcome based on report
 	outcome := report.Outcome
 	if outcome == "" {
 		if report.OK {
@@ -416,7 +432,6 @@ func (s *Store) ReportRun(ctx context.Context, runID string, report *protocol.Re
 		}
 	}
 
-	// Extract cost information
 	var costUSD float64
 	var inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens int64
 	var numTurns int
@@ -462,7 +477,7 @@ func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
 		FROM runs WHERE id = $1
 	`
 	run := &Run{}
-	var endedAt *time.Time
+	var endedAt sql.NullTime
 	var outcome, message, errMsg, sessionID sql.NullString
 	var duration sql.NullInt64
 	var costUSD sql.NullFloat64
@@ -477,7 +492,7 @@ func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
 	if err != nil {
 		return nil, err
 	}
-	run.EndedAt = endedAt
+
 	if outcome.Valid {
 		run.Outcome = outcome.String
 	}
@@ -505,13 +520,18 @@ func (s *Store) GetRun(ctx context.Context, runID string) (*Run, error) {
 	if cacheTokens.Valid {
 		run.CacheTokens = cacheTokens.Int64
 	}
+	if endedAt.Valid {
+		run.EndedAt = &endedAt.Time
+	}
+
 	return run, nil
 }
 
 // ListRunsByLoop retrieves runs for a loop.
 func (s *Store) ListRunsByLoop(ctx context.Context, loopID string, limit int) ([]*Run, error) {
 	query := `
-		SELECT id, loop_id, machine_id, role, status, outcome, message, error, session_id, duration_ms, started_at, ended_at, created_at
+		SELECT id, loop_id, machine_id, role, status, outcome, message, error, session_id,
+		       duration_ms, started_at, ended_at, created_at
 		FROM runs WHERE loop_id = $1 ORDER BY created_at DESC LIMIT $2
 	`
 	rows, err := s.db.QueryContext(ctx, query, loopID, limit)
@@ -523,36 +543,7 @@ func (s *Store) ListRunsByLoop(ctx context.Context, loopID string, limit int) ([
 	var runs []*Run
 	for rows.Next() {
 		run := &Run{}
-		var endedAt *time.Time
-		if err := rows.Scan(
-			&run.ID, &run.LoopID, &run.MachineID, &run.Role, &run.Status,
-			&run.Outcome, &run.Message, &run.Error, &run.SessionID, &run.Duration,
-			&run.StartedAt, &endedAt, &run.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		run.EndedAt = endedAt
-		runs = append(runs, run)
-	}
-	return runs, nil
-}
-
-// ListPendingRuns retrieves all pending runs for a machine.
-func (s *Store) ListPendingRuns(ctx context.Context, machineID string) ([]*Run, error) {
-	query := `
-		SELECT id, loop_id, machine_id, role, status, outcome, message, error, session_id, duration_ms, started_at, ended_at, created_at
-		FROM runs WHERE machine_id = $1 AND status = 'pending' ORDER BY created_at ASC
-	`
-	rows, err := s.db.QueryContext(ctx, query, machineID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var runs []*Run
-	for rows.Next() {
-		run := &Run{}
-		var endedAt *time.Time
+		var endedAt sql.NullTime
 		var outcome, message, errMsg, sessionID sql.NullString
 		var duration sql.NullInt64
 		if err := rows.Scan(
@@ -562,7 +553,6 @@ func (s *Store) ListPendingRuns(ctx context.Context, machineID string) ([]*Run, 
 		); err != nil {
 			return nil, err
 		}
-		run.EndedAt = endedAt
 		if outcome.Valid {
 			run.Outcome = outcome.String
 		}
@@ -577,6 +567,58 @@ func (s *Store) ListPendingRuns(ctx context.Context, machineID string) ([]*Run, 
 		}
 		if duration.Valid {
 			run.Duration = duration.Int64
+		}
+		if endedAt.Valid {
+			run.EndedAt = &endedAt.Time
+		}
+		runs = append(runs, run)
+	}
+	return runs, nil
+}
+
+// ListPendingRuns retrieves all pending runs for a machine.
+func (s *Store) ListPendingRuns(ctx context.Context, machineID string) ([]*Run, error) {
+	query := `
+		SELECT id, loop_id, machine_id, role, status, outcome, message, error, session_id,
+		       duration_ms, started_at, ended_at, created_at
+		FROM runs WHERE machine_id = $1 AND status = 'pending' ORDER BY created_at ASC
+	`
+	rows, err := s.db.QueryContext(ctx, query, machineID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var runs []*Run
+	for rows.Next() {
+		run := &Run{}
+		var endedAt sql.NullTime
+		var outcome, message, errMsg, sessionID sql.NullString
+		var duration sql.NullInt64
+		if err := rows.Scan(
+			&run.ID, &run.LoopID, &run.MachineID, &run.Role, &run.Status,
+			&outcome, &message, &errMsg, &sessionID, &duration,
+			&run.StartedAt, &endedAt, &run.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if outcome.Valid {
+			run.Outcome = outcome.String
+		}
+		if message.Valid {
+			run.Message = message.String
+		}
+		if errMsg.Valid {
+			run.Error = errMsg.String
+		}
+		if sessionID.Valid {
+			run.SessionID = sessionID.String
+		}
+		if duration.Valid {
+			run.Duration = duration.Int64
+		}
+		if endedAt.Valid {
+			run.EndedAt = &endedAt.Time
 		}
 		runs = append(runs, run)
 	}
@@ -596,17 +638,6 @@ func (s *Store) GetRunTokenOwner(ctx context.Context, tokenHash string) (string,
 	return loopID, runID, err
 }
 
-func join(parts []string, sep string) string {
-	result := ""
-	for i, p := range parts {
-		if i > 0 {
-			result += sep
-		}
-		result += p
-	}
-	return result
-}
-
 // Stats holds aggregated statistics.
 type Stats struct {
 	TotalRuns          int64   `json:"total_runs"`
@@ -620,26 +651,22 @@ type Stats struct {
 // GetStats returns aggregated statistics.
 func (s *Store) GetStats(ctx context.Context) (*Stats, error) {
 	stats := &Stats{}
-	
-	// Total runs
+
 	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM runs").Scan(&stats.TotalRuns)
 	if err != nil {
 		return nil, err
 	}
-	
-	// Active loops
+
 	err = s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM loops WHERE enabled = true").Scan(&stats.ActiveLoops)
 	if err != nil {
 		return nil, err
 	}
-	
-	// Total cost
+
 	err = s.db.QueryRowContext(ctx, "SELECT COALESCE(SUM(cost_usd), 0) FROM runs").Scan(&stats.TotalCost)
 	if err != nil {
 		return nil, err
 	}
-	
-	// Total tokens
+
 	err = s.db.QueryRowContext(ctx, "SELECT COALESCE(SUM(cost_input_tokens), 0) FROM runs").Scan(&stats.TotalInputTokens)
 	if err != nil {
 		return nil, err
@@ -652,7 +679,7 @@ func (s *Store) GetStats(ctx context.Context) (*Stats, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return stats, nil
 }
 
@@ -669,13 +696,13 @@ func (s *Store) ListRuns(ctx context.Context, limit int) ([]*Run, error) {
 		ORDER BY r.created_at DESC
 		LIMIT $1
 	`
-	
+
 	rows, err := s.db.QueryContext(ctx, query, limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	
+
 	var runs []*Run
 	for rows.Next() {
 		run := &Run{}
@@ -685,7 +712,7 @@ func (s *Store) ListRuns(ctx context.Context, limit int) ([]*Run, error) {
 		var loopName sql.NullString
 		var cost sql.NullFloat64
 		var inputTokens, outputTokens, cacheTokens sql.NullInt64
-		
+
 		err := rows.Scan(
 			&run.ID, &run.LoopID, &run.MachineID, &run.Role, &run.Status,
 			&outcome, &message, &errMsg, &sessionID, &duration,
@@ -695,8 +722,7 @@ func (s *Store) ListRuns(ctx context.Context, limit int) ([]*Run, error) {
 		if err != nil {
 			return nil, err
 		}
-		
-		run.EndedAt = nil
+
 		if endedAt.Valid {
 			run.EndedAt = &endedAt.Time
 		}
@@ -735,37 +761,13 @@ func (s *Store) ListRuns(ctx context.Context, limit int) ([]*Run, error) {
 	return runs, nil
 }
 
-// ============================================================
-// Finish Loop (Closed-loop completion)
-// ============================================================
-
-// FinishLoop marks a loop as completed.
-// Returns error if loop is already completed or has no goal.
-func (s *Store) FinishLoop(ctx context.Context, loopID, reason string) error {
-	// Check if loop exists and has a goal
-	loop, err := s.GetLoop(ctx, loopID)
-	if err != nil {
-		return fmt.Errorf("loop not found: %w", err)
+func join(parts []string, sep string) string {
+	result := ""
+	for i, p := range parts {
+		if i > 0 {
+			result += sep
+		}
+		result += p
 	}
-
-	if loop.Goal == "" {
-		return fmt.Errorf("loop has no goal to finish (it's an open/monitor loop)")
-	}
-
-	if loop.CompletedAt != nil {
-		return fmt.Errorf("loop already completed at %s", loop.CompletedAt.Format(time.RFC3339))
-	}
-
-	// Mark as completed and disable
-	now := time.Now()
-	query := `
-		UPDATE loops SET
-			enabled = false,
-			completed_at = $2,
-			completion_reason = $3,
-			updated_at = $4
-		WHERE id = $1
-	`
-	_, err = s.db.ExecContext(ctx, query, loopID, now, reason, now)
-	return err
+	return result
 }

@@ -120,6 +120,7 @@ func (g *Gateway) HandlePoll(w http.ResponseWriter, r *http.Request) {
 
 		task := prompts.BuildExecTask(prompts.ExecCoreData{
 			Name:      loop.Name,
+		Task:         loop.Task,
 			TaskFile:  taskFile,
 			GoalLine:  goalLine,
 			StateLine: "loopany report --status new --message \"<message>\"",
@@ -133,6 +134,7 @@ func (g *Gateway) HandlePoll(w http.ResponseWriter, r *http.Request) {
 			Loop: protocol.LoopInfo{
 				ID:           loop.ID,
 				Name:         loop.Name,
+		Task:         loop.Task,
 				Workdir:      loop.Workdir,
 				TaskFile:     loop.TaskFile,
 				Workflow:     loop.Workflow,
@@ -856,6 +858,7 @@ func loopToResponse(loop *store.Loop) protocol.LoopResponse {
 	resp := protocol.LoopResponse{
 		ID:           loop.ID,
 		Name:         loop.Name,
+		Task:         loop.Task,
 		MachineID:    loop.MachineID,
 		Cron:         loop.Cron,
 		Timezone:     loop.Timezone,
